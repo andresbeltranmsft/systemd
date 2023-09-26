@@ -83,21 +83,27 @@ static int slice_add_default_dependencies(Slice *s) {
 }
 
 static int slice_verify(Slice *s) {
+        Unit *u = UNIT(s);
         _cleanup_free_ char *parent = NULL;
         int r;
 
         assert(s);
-        assert(UNIT(s)->load_state == UNIT_LOADED);
+        assert(u->load_state == UNIT_LOADED);
 
-        if (!slice_name_is_valid(UNIT(s)->id))
-                return log_unit_error_errno(UNIT(s), SYNTHETIC_ERRNO(ENOEXEC), "Slice name %s is not valid. Refusing.", UNIT(s)->id);
+        if (!slice_name_is_valid(u->id))
+                return log_unit_error_errno(u, SYNTHETIC_ERRNO(ENOEXEC), "Slice name %s is not valid. Refusing.", u->id);
 
-        r = slice_build_parent_slice(UNIT(s)->id, &parent);
+        r = slice_build_parent_slice(u->id, &parent);
         if (r < 0)
-                return log_unit_error_errno(UNIT(s), r, "Failed to determine parent slice: %m");
+                return log_unit_error_errno(u, r, "Failed to determine parent slice: %m");
 
-        if (parent ? !unit_has_name(UNIT_GET_SLICE(UNIT(s)), parent) : !!UNIT_GET_SLICE(UNIT(s)))
-                return log_unit_error_errno(UNIT(s), SYNTHETIC_ERRNO(ENOEXEC), "Located outside of parent slice. Refusing.");
+        /* Do not check the parent slice if ignore dependencies is set */
+        if (u->manager && FLAGS_SET(u->manager->test_run_flags, MANAGER_TEST_RUN_IGNORE_DEPENDENCIES)) {
+                return 0;
+        }
+
+        if (parent ? !unit_has_name(UNIT_GET_SLICE(u), parent) : !!UNIT_GET_SLICE(u))
+                return log_unit_error_errno(u, SYNTHETIC_ERRNO(ENOEXEC), "Located outside of parent slice. Refusing.");
 
         return 0;
 }
