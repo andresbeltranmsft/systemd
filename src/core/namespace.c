@@ -109,6 +109,9 @@ typedef struct MountEntry {
         unsigned n_followed;
         LIST_HEAD(MountOptions, image_options_const);
         char **overlay_layers;
+        bool idmapped;
+        uid_t uid;
+        gid_t gid;
 } MountEntry;
 
 typedef struct MountList {
@@ -437,6 +440,9 @@ static int append_bind_mounts(MountList *ml, const BindMount *binds, size_t n) {
                         .nosuid = b->nosuid,
                         .source_const = b->source,
                         .ignore = b->ignore_enoent,
+                        .idmapped = b->idmapped,
+                        .uid = b->uid,
+                        .gid = b->gid,
                 };
         }
 
@@ -1710,6 +1716,33 @@ static int apply_one_mount(
         }
 
         log_debug("Successfully mounted %s to %s", what, mount_entry_path(m));
+
+        /* Take care of id-mapped mounts */
+        if (m->idmapped) {
+                _cleanup_close_ int userns_fd = -EBADF;
+                _cleanup_free_ char *uid_map = NULL, *gid_map = NULL;
+
+                log_debug("Setting an id-mapped mount on %s", mount_entry_path(m));
+
+                r = strextendf(&uid_map, UID_FMT " " UID_FMT " " UID_FMT "\n", (uid_t)0, m->uid, 1u);
+                if (r < 0)
+                        return log_oom();
+
+                r = strextendf(&gid_map, UID_FMT " " UID_FMT " " UID_FMT "\n", (gid_t)0, m->gid, 1u);
+                if (r < 0)
+                        return log_oom();
+
+                userns_fd = userns_acquire(uid_map, gid_map);
+                if (userns_fd < 0)
+                        return log_error_errno(userns_fd, "Failed to allocate user namespace: %m");
+
+                r = remount_idmap_fd(STRV_MAKE(mount_entry_path(m)), userns_fd);
+                if (r < 0)
+                        return log_error_errno(r, "Failed to create an id-mapped mount: %m");
+
+                log_debug("ID-mapped mount created successfully for %s", mount_entry_path(m));
+        }
+
         return 1;
 }
 
