@@ -4777,22 +4777,36 @@ int config_parse_exec_quota(
                 void *data,
                 void *userdata) {
 
-        uint32_t *limit = data;
+        QuotaLimit *quota_limit = data;
+        uint64_t quota_absolute = UINT64_MAX;
+        uint32_t quota_scale = UINT32_MAX;
         int r;
 
-        if (isempty(rvalue)) {
-                *limit = 0;
+        if (isempty(rvalue))
                 return 0;
-        }
 
         r = parse_permyriad(rvalue);
         if (r < 0) {
-                log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse disk quota value, ignoring: %s", rvalue);
-                return 0;
+                uint64_t bytes = CGROUP_LIMIT_MAX;
+                r = parse_size(rvalue, 1024, &bytes);
+                if (r < 0) {
+                        log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to parse disk quota value, ignoring: %s", rvalue);
+                        return 0;
+                }
+                quota_absolute = bytes;
+                log_info("andres parse M/G");
+        } else {
+                /* Normalize to 2^32-1 == 100% */
+                quota_scale = UINT32_SCALE_FROM_PERMYRIAD(r);
+                log_info("andres parse percent");
         }
 
-        /* Normalize to 2^32-1 == 100% */
-        *limit = UINT32_SCALE_FROM_PERMYRIAD(r);
+        quota_limit->quota_absolute = quota_absolute;
+        quota_limit->quota_scale = quota_scale;
+        quota_limit->quota_set = true;
+
+        log_info("andres parse %lu %u %d", quota_limit->quota_absolute, quota_limit->quota_scale, quota_limit->quota_set);
+
         return 0;
 }
 

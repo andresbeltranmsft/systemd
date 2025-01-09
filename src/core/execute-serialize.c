@@ -2005,7 +2005,11 @@ static int exec_context_serialize(const ExecContext *c, FILE *f) {
                 if (!key)
                         return log_oom_debug();
 
-                if (asprintf(&value, "%04o %" PRIu32, c->directories[dt].mode, c->directories[dt].percent_quota) < 0)
+                //if (asprintf(&value, "%04o %lu %u %d", c->directories[dt].mode,
+                if (asprintf(&value, "%04o %" PRIu64 " %" PRIu32 " %d", c->directories[dt].mode,
+                                                                        c->directories[dt].exec_quota.quota_absolute,
+                                                                        c->directories[dt].exec_quota.quota_scale,
+                                                                        c->directories[dt].exec_quota.quota_set) < 0)
                         return log_oom_debug();
 
                 FOREACH_ARRAY(i, c->directories[dt].items, c->directories[dt].n_items) {
@@ -2036,6 +2040,7 @@ static int exec_context_serialize(const ExecContext *c, FILE *f) {
                         }
                 }
 
+                log_info("andres serialized key=%s value=%s", key, value);
                 r = serialize_item(f, key, value);
                 if (r < 0)
                         return r;
@@ -2905,10 +2910,10 @@ static int exec_context_deserialize(ExecContext *c, FILE *f) {
                         if (c->runtime_directory_preserve_mode < 0)
                                 return -EINVAL;
                 } else if ((val = startswith(l, "exec-context-directories-"))) {
-                        _cleanup_free_ char *type = NULL, *mode = NULL, *percent_quota = NULL;
+                        _cleanup_free_ char *type = NULL, *mode = NULL, *quota_absolute = NULL, *quota_scale = NULL, *quota_set = NULL;
                         ExecDirectoryType dt;
 
-                        r = extract_many_words(&val, "= ", 0, &type, &mode, &percent_quota);
+                        r = extract_many_words(&val, "= ", 0, &type, &mode, &quota_absolute, &quota_scale, &quota_set);
                         if (r < 0)
                                 return r;
                         if (r == 0 || !mode)
@@ -2922,9 +2927,20 @@ static int exec_context_deserialize(ExecContext *c, FILE *f) {
                         if (r < 0)
                                 return r;
 
-                        r = safe_atou32(percent_quota, &c->directories[dt].percent_quota);
+                        r = safe_atou64(quota_absolute, &c->directories[dt].exec_quota.quota_absolute);
                         if (r < 0)
                                return r;
+
+                        r = safe_atou32(quota_scale, &c->directories[dt].exec_quota.quota_scale);
+                        if (r < 0)
+                               return r;
+
+                        r = parse_boolean(quota_set);
+                        if (r < 0)
+                                return r;
+                        c->directories[dt].exec_quota.quota_set = r;
+
+                        //log_info("andres deserialized type=%s mode=%s quota_set=%d", type, mode, r);
 
                         for (;;) {
                                 _cleanup_free_ char *tuple = NULL, *path = NULL, *only_create = NULL, *read_only = NULL;

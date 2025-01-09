@@ -850,35 +850,75 @@ bool path_below_api_vfs(const char *p) {
         return PATH_STARTSWITH_SET(p, "/dev", "/sys", "/proc");
 }
 
-int find_mountpoint(const char *device_path, char **ret_mountpoint) {
+// int find_mountpoint(const char *device_path, char **ret_mountpoint) {
 
-        _cleanup_fclose_ FILE *fp = NULL;
-        fp = fopen("/proc/mounts", "r");
-        if (!fp)
-                return -1;
+//         /*_cleanup_fclose_ FILE *fp = NULL;
+//         fp = fopen("/proc/mounts", "r");
+//         if (!fp)
+//                 return -1;
 
-        int r = 0;
-        for (;;) {
-                _cleanup_free_ char *line = NULL;
+//         int r = 0;
+//         for (;;) {
+//                 _cleanup_free_ char *line = NULL;
 
-                r = read_line(fp, LONG_LINE_MAX, &line);
-                if (r < 0)
-                        return r;
-                if (r == 0)
-                        break;
+//                 r = read_line(fp, LONG_LINE_MAX, &line);
+//                 if (r < 0)
+//                         return r;
+//                 if (r == 0)
+//                         break;
 
-                _cleanup_free_ char *dev_name = NULL;
-                _cleanup_free_ char *mount = NULL;
-                if (sscanf(line, "%ms %ms", &dev_name, &mount) != 2)
-                        continue;
+//                 _cleanup_free_ char *dev_name = NULL;
+//                 _cleanup_free_ char *mount = NULL;
+//                 if (sscanf(line, "%ms %ms", &dev_name, &mount) != 2)
+//                         continue;
 
-                if(streq(dev_name, device_path)) {
-                        r = strdup_to(ret_mountpoint, mount);
-                        if (r < 0)
-                                return r;
-                        break;
-                }
-        }
+//                 if (streq(dev_name, device_path)) {
+//                         r = strdup_to(ret_mountpoint, mount);
+//                         if (r < 0)
+//                                 return r;
+//                         break;
+//                 }
+//         }
 
-        return r;
-}
+//         return r;*/
+
+
+//         /*_cleanup_(mnt_free_tablep) struct libmnt_table *table = NULL;
+//         _cleanup_(mnt_free_iterp) struct libmnt_iter *iter = NULL;
+//         _cleanup_set_free_ Set *devices = NULL;
+//         int r;
+
+//         r = libmount_parse(NULL, NULL, &table, &iter);
+//         if (r < 0)
+//                 return log_error_errno(r, "Failed to parse /proc/self/mountinfo: %m");
+
+//         for (;;) {
+//                 struct libmnt_fs *fs;
+//                 const char *device, *path, *options, *fstype;
+
+//                 r = mnt_table_next_fs(table, iter, &fs);
+//                 if (r == 1)
+//                         break;
+//                 if (r < 0)
+//                         return log_error_errno(r, "Failed to get next entry from /proc/self/mountinfo: %m");
+
+//                 device = mnt_fs_get_source(fs);
+//                 path = mnt_fs_get_target(fs);
+//                 options = mnt_fs_get_options(fs);
+//                 fstype = mnt_fs_get_fstype(fs);
+
+//                 if (!device || !path)
+//                         continue;
+
+//                 if (streq(dev_name, device_path)) {
+//                         r = strdup_to(ret_mountpoint, mount);
+//                         if (r < 0)
+//                                 return r;
+//                         break;
+//                 }
+//         }*/
+
+
+
+//         return r;
+// }

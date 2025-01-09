@@ -654,6 +654,9 @@ foreach ident : [
                                  #include <signal.h>
                                  #include <sys/wait.h>
                                  #include <sys/pidfd.h>'''],
+        ['quotactl_fd',       '''#include <stdlib.h>
+                                 #include <unistd.h>
+                                 #include <sys/quota.h>'''],
         ['rt_sigqueueinfo',   '''#include <stdlib.h>
                                  #include <unistd.h>
                                  #include <signal.h>

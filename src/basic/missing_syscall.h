@@ -10,6 +10,7 @@
  * include this. */
 #include <linux/time_types.h>
 #endif
+//#include <sys/quota.h>
 #include <signal.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -351,6 +352,21 @@ static inline int missing_pidfd_open(pid_t pid, unsigned flags) {
 }
 
 #  define pidfd_open missing_pidfd_open
+#endif
+
+/* ======================================================================= */
+
+#if !HAVE_QUOTACTL_FD
+static inline int missing_quotactl_fd(unsigned int fd, unsigned int cmd, unsigned int id, void *addr) {
+#  ifdef __NR_quotactl_fd
+        return syscall(__NR_quotactl_fd, fd, cmd, id, addr);
+#  else
+        errno = ENOSYS;
+        return -1;
+#  endif
+}
+
+#  define quotactl_fd missing_quotactl_fd
 #endif
 
 /* ======================================================================= */

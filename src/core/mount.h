@@ -105,3 +105,5 @@ const char* mount_result_to_string(MountResult i) _const_;
 MountResult mount_result_from_string(const char *s) _pure_;
 
 DEFINE_CAST(MOUNT, Mount);
+
+const char* find_mountpoint(const char *path) _const_;

@@ -2489,3 +2489,22 @@ const UnitVTable mount_vtable = {
 
         .notify_plymouth = true,
 };
+
+const char* find_mountpoint(const char *path) {
+        _cleanup_free_ char *mtpoint = NULL;
+        /*int r;
+
+        mtpoint = mnt_get_mountpoint(path);
+        if (mtpoint == NULL)
+                return -1;
+
+        r = strdup_to(ret_mountpoint, mtpoint);
+        if (r < 0)
+                return r;*/
+
+        mtpoint = mnt_get_mountpoint(path);
+        if (!mtpoint)
+                return NULL;
+
+        return mtpoint ? TAKE_PTR(mtpoint) : strdup("");
+}

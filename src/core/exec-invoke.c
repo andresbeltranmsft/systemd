@@ -55,7 +55,8 @@
 #include "missing_securebits.h"
 #include "missing_syscall.h"
 #include "mkdir-label.h"
-#include "mountpoint-util.h"
+#include "mount.h"
+//#include "mountpoint-util.h"
 #include "MurmurHash2.h"
 #include "percent-util.h"
 #include "proc-cmdline.h"
@@ -2448,10 +2449,23 @@ static int create_many_symlinks(const char *root, const char *source, char **sym
         return 0;
 }
 
-static int apply_exec_quotas(const char *target_dir, const char *cgroup_path, ExecDirectoryType type, uint32_t percent_quota) {
+#define PROJ_ID_MIN 61184 //2147483648
+#define PROJ_ID_MAX 65519 //4294967294
+#define PRJID_CLAMP_INTO_QUOTA_RANGE(rnd) (((uint32_t) (rnd) % (PROJ_ID_MAX - PROJ_ID_MIN + 1)) + PROJ_ID_MIN)
+#include "random-util.h"
+
+static int apply_exec_quotas(const char *target_dir, const char *cgroup_path, ExecDirectoryType type, QuotaLimit ql) {
         assert(target_dir);
-        assert(percent_quota > 0);
+        assert(ql.quota_set);
+
+        static const sd_id128_t k = SD_ID128_ARRAY(e1,4a,79,9b,64,40,41,4a,a8,46,c2,f3,f9,19,4f,01);
+        _cleanup_close_ int fd = -EBADF;
         int r = 0;
+
+        fd = xopenat(AT_FDCWD, target_dir, O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW);
+        //fd = open(target_dir, O_PATH);
+        if (fd < 0)
+                return log_debug_errno(r, "Exec quotas: Failed to open '%s': %m", target_dir);
 
         dev_t devno;
         r = get_block_device(target_dir, &devno);
@@ -2474,61 +2488,118 @@ static int apply_exec_quotas(const char *target_dir, const char *cgroup_path, Ex
                 return -1;
         }
 
-        uint32_t proj_id = MurmurHash2(proj_id_plain, strlen(proj_id_plain), 0);
+        uint32_t proj_id = 44; //PRJID_CLAMP_INTO_QUOTA_RANGE(siphash24(proj_id_plain, strlen(proj_id_plain), k.bytes));
+        log_info("andresquota candidate projid = %u", proj_id);
 
         /* Check if project quotas are supported */
-        struct dqblk req;
-        r = quotactl_devnum(QCMD_FIXED(Q_GETQUOTA, PRJQUOTA), devno, proj_id, &req);
-        if (r == -ESRCH || ERRNO_IS_NEG_NOT_SUPPORTED(r)) {
-                log_warning("Not applying storage quotas: project quotas are not supported for %s", target_dir);
-                return 0;
-        } else if (r < 0)
-                return log_debug_errno(r, "Exec quotas: Failed to query disk quota for prjid %u: %m", proj_id);
+        int retries = 0;
+        int max_retries = 5;
+        while (true) {
+                if (retries >= max_retries)
+                        return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Exec quotas: Failed to generate unique project id for %s: %m", target_dir);
+
+                struct dqblk req;
+                //r = quotactl_devnum(QCMD_FIXED(Q_GETQUOTA, PRJQUOTA), devno, proj_id, &req);
+                r = quotactl_fd(fd, QCMD_FIXED(Q_GETQUOTA, PRJQUOTA), proj_id, &req);
+                if (r == -ESRCH || ERRNO_IS_NEG_NOT_SUPPORTED(r) || ERRNO_IS_NEG_PRIVILEGE(r)) {
+                        log_warning("Not applying storage quotas: project quotas are not supported for %s", target_dir);
+                        return 0;
+                } else if (r < 0)
+                        return log_info_errno(r, "Exec quotas: Failed to query disk quota for prjid %u: %m", proj_id);
+
+                log_info("andresquota get quota for %u: dqb_valid=%u block_hl=%lu", proj_id, req.dqb_valid, req.dqb_bhardlimit);
+
+                if (!FLAGS_SET(req.dqb_valid, QIF_BLIMITS) || req.dqb_bhardlimit <= 0)
+                        break;
+
+                log_info("andresquota proj id = %u already exists", proj_id);
+                random_bytes(&proj_id, sizeof(proj_id));
+                proj_id = PRJID_CLAMP_INTO_QUOTA_RANGE(proj_id);
+                retries++;
+        }
+
+        log_info("andresquota selected projid = %u", proj_id);
 
         /* Set projid (equivalent to chattr +P -p) */
-        struct fsxattr attrs;
-        int fd = xopenat(AT_FDCWD, target_dir, O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW);
-        r = ioctl(fd, FS_IOC_FSGETXATTR, &attrs);
-        if (r < 0)
-                return log_debug_errno(r, "Exec quotas: Failed to get fsxattr for %s", target_dir);
-
-        attrs.fsx_xflags = FS_XFLAG_PROJINHERIT;
-        attrs.fsx_projid = proj_id;
-
-        r = ioctl(fd, FS_IOC_FSSETXATTR, &attrs);
+        r = set_proj_id(fd, proj_id);
         if (r < 0)
                 return log_debug_errno(r, "Exec quotas: Failed to set project id for %s: %m", target_dir);
 
         /* Set Quotas */
-        _cleanup_free_ char *devpath = NULL;
+        /*_cleanup_free_ char *devpath = NULL;
         r = device_open_from_devnum(S_IFBLK, devno, O_RDONLY|O_CLOEXEC, &devpath);
         if (r < 0)
                 return log_debug_errno(r, "Exec quotas: Failed to get device path for %s: %m", target_dir);
 
-        _cleanup_free_ char *devmountpoint = NULL;
-        r = find_mountpoint(devpath, &devmountpoint);
+        _cleanup_free_ const char *devmountpoint = NULL;
+        _cleanup_free_ char *foo = "NULL";
+        //r = find_mountpoint(devpath, &devmountpoint);
+        //r = find_mountpoint(target_dir, &devmountpoint);
+        //r = readlinkat_malloc(fd, target_dir, &foo);
+        r = chase(target_dir, NULL, 0, &foo, NULL);
         if (r < 0)
-                return log_debug_errno(r, "Exec quotas: Failed to find device mountpoint for %s: %m", target_dir);
+                return log_info_errno(r, "Exec quotas: Failed to chase path %s: %m", target_dir);
+
+        log_info("andresquota readlink= %s", foo);
+        devmountpoint = find_mountpoint(foo);
+        if (!devmountpoint)
+                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Exec quotas: Failed to find device mountpoint for %s: %m", target_dir);
+        log_info("andresquota mtpoint for %s is %s", target_dir, devmountpoint);*/
 
         struct statvfs disk_st;
-        r = statvfs(devmountpoint, &disk_st);
+        r = fstatvfs(fd, &disk_st);
+        if (r < 0)
+                return log_debug_errno(r, "Exec quotas: Failed to get filesystem data for %s: %m", target_dir);
+        log_info("andresquota fstatvfs: bs= %lu, blocks= %lu, inodes= %lu", disk_st.f_frsize, disk_st.f_blocks, disk_st.f_files);
+
+        struct statvfs disk_st2;
+        r = statvfs("/datadrive", &disk_st2);
         if (r < 0)
                 return log_debug_errno(r, "Exec quotas: Failed to get filesystem data for %s: %m", target_dir);
 
-        double percent = UINT32_SCALE_TO_PERCENT(percent_quota) / 100.0;
-        uint64_t block_limit = (uint64_t)(disk_st.f_blocks * percent);
-        uint64_t inode_limit = (uint64_t)(disk_st.f_files * percent);
+        log_info("andresquota statvfs mtp: bs= %lu, blocks= %lu, inodes= %lu", disk_st2.f_frsize, disk_st2.f_blocks, disk_st2.f_files);
 
+        struct statvfs disk_st3;
+        r = statvfs(target_dir, &disk_st3);
+        if (r < 0)
+                return log_debug_errno(r, "Exec quotas: Failed to get filesystem data for %s: %m", target_dir);
+
+        log_info("andresquota statvfs path: bs= %lu, blocks= %lu, inodes= %lu", disk_st3.f_frsize, disk_st3.f_blocks, disk_st3.f_files);
+
+        uint64_t block_limit = 0;
+        uint64_t inode_limit = 0;
+
+        if (ql.quota_absolute == UINT64_MAX) {
+                int percent = UINT32_SCALE_TO_PERCENT(ql.quota_scale);
+                block_limit = (uint64_t)((disk_st.f_blocks / 100) * percent);
+                inode_limit = (uint64_t)((disk_st.f_files / 100) * percent);
+                log_info("andresquota exec-invoke percent=%d blocklim=%lu inodlim=%lu", percent, block_limit, inode_limit);
+        } else {
+                if (disk_st.f_frsize <= 0)
+                       return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Exec quotas: Failed to get absolute block size for %s: %m", target_dir);
+
+                //log_info("andres exec-invoke %lu %u", ql.quota_absolute, ql.quota_scale);
+
+                block_limit = (uint64_t)(ql.quota_absolute / disk_st.f_frsize);
+                if (block_limit > disk_st.f_blocks)
+                        return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Exec quotas: Failed to set absolute block limit for %s: %m", target_dir);
+
+                log_info("andresquota exec-invoke absolute(bytes)=%lu blocklim=%lu", ql.quota_absolute, block_limit);
+        }
+
+        struct dqblk req;
         req.dqb_bhardlimit = block_limit;
         req.dqb_bsoftlimit = 0;
         req.dqb_ihardlimit = inode_limit;
         req.dqb_isoftlimit = 0;
         req.dqb_valid = QIF_LIMITS;
-        r = quotactl_devnum(QCMD_FIXED(Q_SETQUOTA, PRJQUOTA), devno, proj_id, &req);
-        if (r < 0)
-                return log_debug_errno(r, "Exec quotas: Failed to set project quotas for %s: %m", target_dir);
 
-        log_debug("Storage quotas set for %s. Block limit = %lu, inode limit = %lu", target_dir, block_limit, inode_limit);
+        r = quotactl_fd(fd, QCMD_FIXED(Q_SETQUOTA, PRJQUOTA), proj_id, &req);
+        //r = quotactl_devnum(QCMD_FIXED(Q_SETQUOTA, PRJQUOTA), devno, proj_id, &req);
+        if (r < 0)
+                return log_info_errno(r, "Exec quotas: Failed to set project quotas for %s: %m", target_dir);
+
+        log_info("Storage quotas set for %s. Block limit = %lu, inode limit = %lu", target_dir, block_limit, inode_limit);
 
         return r;
 }
@@ -2864,10 +2935,11 @@ static int setup_exec_directory(
                 }
 
                 /* Apply storage quotas if needed */
-                uint32_t exec_dir_quota = context->directories[type].percent_quota;
+                QuotaLimit ql;
+                ql = context->directories[type].exec_quota;
 
-                if (IN_SET(type, EXEC_DIRECTORY_STATE, EXEC_DIRECTORY_CACHE, EXEC_DIRECTORY_LOGS) && exec_dir_quota > 0) {
-                        r = apply_exec_quotas(target_dir, params->cgroup_path, type, exec_dir_quota);
+                if (IN_SET(type, EXEC_DIRECTORY_STATE, EXEC_DIRECTORY_CACHE, EXEC_DIRECTORY_LOGS) && ql.quota_set) {
+                        r = apply_exec_quotas(target_dir, params->cgroup_path, type, ql);
                         if (r < 0) {
                                 log_debug("Unable to set storage limits for %s", target_dir);
                                 goto fail;

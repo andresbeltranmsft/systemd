@@ -21,6 +21,7 @@ SYSCALLS = [
     'pidfd_send_signal',
     'pkey_mprotect',
     'renameat2',
+    'quotactl_fd',
     'setns',
     'statx',
 ]
