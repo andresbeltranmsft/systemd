@@ -4782,8 +4782,10 @@ int config_parse_exec_quota(
         uint32_t quota_scale = UINT32_MAX;
         int r;
 
-        if (isempty(rvalue))
+        if (isempty(rvalue) || streq(rvalue, "off")) {
+                quota_limit->quota_set = false;
                 return 0;
+        }
 
         r = parse_permyriad(rvalue);
         if (r < 0) {
@@ -4794,10 +4796,9 @@ int config_parse_exec_quota(
                         return 0;
                 }
                 quota_absolute = bytes;
-        } else {
+        } else
                 /* Normalize to 2^32-1 == 100% */
                 quota_scale = UINT32_SCALE_FROM_PERMYRIAD(r);
-        }
 
         quota_limit->quota_absolute = quota_absolute;
         quota_limit->quota_scale = quota_scale;

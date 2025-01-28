@@ -2005,10 +2005,7 @@ static int exec_context_serialize(const ExecContext *c, FILE *f) {
                 if (!key)
                         return log_oom_debug();
 
-                if (asprintf(&value, "%04o %" PRIu64 " %" PRIu32 " %d", c->directories[dt].mode,
-                                                                        c->directories[dt].exec_quota.quota_absolute,
-                                                                        c->directories[dt].exec_quota.quota_scale,
-                                                                        c->directories[dt].exec_quota.quota_set) < 0)
+                if (asprintf(&value, "%04o", c->directories[dt].mode) < 0)
                         return log_oom_debug();
 
                 FOREACH_ARRAY(i, c->directories[dt].items, c->directories[dt].n_items) {
@@ -2042,6 +2039,23 @@ static int exec_context_serialize(const ExecContext *c, FILE *f) {
                 r = serialize_item(f, key, value);
                 if (r < 0)
                         return r;
+
+                if (c->directories[dt].exec_quota.quota_set) {
+                        _cleanup_free_ char *key_quota = NULL, *value_quota = NULL;
+                        key_quota = strjoin("exec-context-quota-directories-", exec_directory_type_to_string(dt));
+                        if (!key_quota)
+                                return log_oom_debug();
+
+                        if (asprintf(&value_quota, "%" PRIu64 " %" PRIu32 " %d", c->directories[dt].exec_quota.quota_absolute,
+                                                                                c->directories[dt].exec_quota.quota_scale,
+                                                                                c->directories[dt].exec_quota.quota_set) < 0)
+                                return log_oom_debug();
+
+                        log_info("andres serialization quota key=%s value=%s", key_quota, value_quota);
+                        r = serialize_item(f, key_quota, value_quota);
+                        if (r < 0)
+                                return r;
+                }
         }
 
         r = serialize_usec(f, "exec-context-timeout-clean-usec", c->timeout_clean_usec);
@@ -2911,7 +2925,7 @@ static int exec_context_deserialize(ExecContext *c, FILE *f) {
                         _cleanup_free_ char *type = NULL, *mode = NULL, *quota_absolute = NULL, *quota_scale = NULL, *quota_set = NULL;
                         ExecDirectoryType dt;
 
-                        r = extract_many_words(&val, "= ", 0, &type, &mode, &quota_absolute, &quota_scale, &quota_set);
+                        r = extract_many_words(&val, "= ", 0, &type, &mode);//, &quota_absolute, &quota_scale, &quota_set);
                         if (r < 0)
                                 return r;
                         if (r == 0 || !mode)
@@ -2924,19 +2938,6 @@ static int exec_context_deserialize(ExecContext *c, FILE *f) {
                         r = parse_mode(mode, &c->directories[dt].mode);
                         if (r < 0)
                                 return r;
-
-                        r = safe_atou64(quota_absolute, &c->directories[dt].exec_quota.quota_absolute);
-                        if (r < 0)
-                               return r;
-
-                        r = safe_atou32(quota_scale, &c->directories[dt].exec_quota.quota_scale);
-                        if (r < 0)
-                               return r;
-
-                        r = parse_boolean(quota_set);
-                        if (r < 0)
-                                return r;
-                        c->directories[dt].exec_quota.quota_set = r;
 
                         for (;;) {
                                 _cleanup_free_ char *tuple = NULL, *path = NULL, *only_create = NULL, *read_only = NULL;
@@ -2990,6 +2991,30 @@ static int exec_context_deserialize(ExecContext *c, FILE *f) {
                                                 return r;
                                 }
                         }
+                } else if ((val = startswith(l, "exec-context-quota-directories-"))) {
+                        _cleanup_free_ char *type = NULL, *quota_absolute = NULL, *quota_scale = NULL, *quota_set = NULL;
+                        ExecDirectoryType dt;
+
+                        r = extract_many_words(&val, "= ", 0, &type, &quota_absolute, &quota_scale, &quota_set);
+                        if (r < 0)
+                                return r;
+
+                        dt = exec_directory_type_from_string(type);
+                        if (dt < 0)
+                                return -EINVAL;
+
+                        r = safe_atou64(quota_absolute, &c->directories[dt].exec_quota.quota_absolute);
+                        if (r < 0)
+                               return r;
+
+                        r = safe_atou32(quota_scale, &c->directories[dt].exec_quota.quota_scale);
+                        if (r < 0)
+                               return r;
+
+                        r = parse_boolean(quota_set);
+                        if (r < 0)
+                                return r;
+                        c->directories[dt].exec_quota.quota_set = r;
                 } else if ((val = startswith(l, "exec-context-timeout-clean-usec="))) {
                         r = deserialize_usec(val, &c->timeout_clean_usec);
                         if (r < 0)

@@ -173,20 +173,89 @@ int read_attr_at(int dir_fd, const char *path, unsigned *ret) {
         return read_attr_fd(fd, ret);
 }
 
-int set_proj_id(int dir_fd, uint32_t proj_id) {
-        int r = 0;
+int get_proj_id(int fd, uint32_t *ret) {
         struct fsxattr attrs;
 
-        r = ioctl(dir_fd, FS_IOC_FSGETXATTR, &attrs);
-        if (r < 0)
-                return r;
+        if (ioctl(fd, FS_IOC_FSGETXATTR, &attrs) < 0)
+                return -errno;
+
+        if (attrs.fsx_projid > 0) //attrs.fsx_xflags == FS_XFLAG_PROJINHERIT &&
+                *ret = attrs.fsx_projid;
+
+        return 0;
+}
+
+#include "recurse-dir.h"
+
+int set_proj_id(const char *path, uint32_t proj_id) {
+        struct fsxattr attrs;
+
+        int fd = xopenat(AT_FDCWD, path, O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW);
+        if (fd < 0)
+                return -1;
+
+        log_info("andres set prid for %s inode=%d", path, fd);
+        if (ioctl(fd, FS_IOC_FSGETXATTR, &attrs) < 0)
+                return -errno;
+
+        if (attrs.fsx_projid == proj_id) //attrs.fsx_xflags == FS_XFLAG_PROJINHERIT &&
+                return 0;
+
+        //attrs.fsx_xflags = FS_XFLAG_PROJINHERIT;
+        attrs.fsx_projid = proj_id;
+
+        return RET_NERRNO(ioctl(fd, FS_IOC_FSSETXATTR, &attrs));
+}
+
+static int set_proj_id_cb(
+                RecurseDirEvent event,
+                const char *path,
+                int dir_fd,
+                int inode_fd,
+                const struct dirent *de,
+                const struct statx *sx,
+                void *userdata) {
+
+        uint32_t proj_id = *(uint32_t *) userdata;
+
+        log_info("andres chattr callback setting %u for fd=%d path=%s inode_fd=%d", proj_id, dir_fd, path, inode_fd);
+
+        return set_proj_id(path, proj_id);
+        /*
+        struct fsxattr attrs;
+        int fd = xopenat(AT_FDCWD, path, O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW);
+        if (ioctl(fd, FS_IOC_FSGETXATTR, &attrs) < 0) {
+                log_info("andres chattr fd");
+                return -errno;
+        }
+
+        if (attrs.fsx_xflags == FS_XFLAG_PROJINHERIT && attrs.fsx_projid == proj_id)
+                return 0;
 
         attrs.fsx_xflags = FS_XFLAG_PROJINHERIT;
         attrs.fsx_projid = proj_id;
 
-        r = ioctl(dir_fd, FS_IOC_FSSETXATTR, &attrs);
-        if (r < 0)
-                return r;
+        return RET_NERRNO(ioctl(fd, FS_IOC_FSSETXATTR, &attrs));
+        //return 0;*/
 
-        return r;
+        /*
+        if (event == RECURSE_DIR_LEAVE &&
+            de->d_type == DT_DIR &&
+            unlinkat(dir_fd, de->d_name, AT_REMOVEDIR) < 0 &&
+            !IN_SET(errno, ENOENT, ENOTEMPTY, EBUSY))
+                log_debug_errno(errno, "Failed to trim inner cgroup %s, ignoring: %m", path);
+
+        return RECURSE_DIR_CONTINUE;*/
+}
+
+int set_proj_id_recursive(const char *path, uint32_t proj_id) {
+        log_info("andres chattr setting %u for %s", proj_id, path);
+        return recurse_dir_at(
+                        AT_FDCWD,
+                        path,
+                        /* statx_mask = */ 0,
+                        /* n_depth_max = */ UINT_MAX,
+                        RECURSE_DIR_ENSURE_TYPE, //RECURSE_DIR_INODE_FD RECURSE_DIR_TOPLEVEL
+                        set_proj_id_cb,
+                        &proj_id);
 }

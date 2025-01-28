@@ -1013,6 +1013,28 @@ static int property_get_exec_quota(sd_bus *bus,
         assert(bus);
         assert(reply);
 
+        log_info("andres dbusget prop ab=%lu sc=%u set=%d", q->quota_absolute, q->quota_scale, q->quota_set);
+        //TODO: single value
+
+        /*int r = 0;
+        r = sd_bus_message_open_container(reply, 'r', "tub");
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_append(reply, "t", q->quota_absolute);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_append(reply, "u", q->quota_scale);
+        if (r < 0)
+                return r;
+
+        r = sd_bus_message_append(reply, "b", q->quota_set);
+        if (r < 0)
+                return r;
+
+        return sd_bus_message_close_container(reply);*/
+
         return sd_bus_message_append(reply, "(tub)", q->quota_absolute, q->quota_scale, q->quota_set);
 }
 
@@ -3582,6 +3604,63 @@ int bus_exec_context_set_transient_property(
 
                 return 1;
 
+        } else if (STR_IN_SET(name, "StateDirectoryQuota", "CacheDirectoryQuota", "LogsDirectoryQuota")) {
+                log_info("andres dbusset transient");
+                uint64_t quota_absolute = UINT64_MAX;
+                uint32_t quota_scale = UINT32_MAX;
+                bool quota_set;
+
+                r = sd_bus_message_enter_container(message, 'r', "tub");
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_read(message, "t", &quota_absolute);
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_read(message, "u", &quota_scale);
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_read(message, "b", &quota_set);
+                if (r < 0)
+                        return r;
+
+                r = sd_bus_message_exit_container(message);
+                if (r < 0)
+                        return r;
+
+                if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
+                        log_info("andres dbusset transient set prop unit");
+                        if (!quota_set)
+                                unit_write_settingf(u, flags, name, "%s=", name);
+                        else {
+                                ExecDirectoryType dt;
+                                if (streq(name, "StateDirectoryQuota"))
+                                        dt = exec_directory_type_from_string("StateDirectory");
+                                else if (streq(name, "CacheDirectoryQuota"))
+                                        dt = exec_directory_type_from_string("CacheDirectory");
+                                else if (streq(name, "LogsDirectoryQuota"))
+                                        dt = exec_directory_type_from_string("LogsDirectory");
+                                else
+                                        return -EINVAL;
+
+                                if (dt < 0)
+                                        return -EINVAL;
+
+                                c->directories[dt].exec_quota.quota_absolute = quota_absolute;
+                                c->directories[dt].exec_quota.quota_scale = quota_scale;
+                                c->directories[dt].exec_quota.quota_set = quota_set;
+
+                                if (quota_absolute != UINT64_MAX)
+                                        unit_write_settingf(u, flags, name, "%s=%lu", name, quota_absolute);
+                                else
+                                        unit_write_settingf(u, flags, name, "%s=%u", name, quota_scale);
+                        }
+                }
+
+                return 1;
+
         } else if (STR_IN_SET(name, "AppArmorProfile", "SmackProcessLabel")) {
                 int ignore;
                 const char *s;
@@ -3978,46 +4057,6 @@ int bus_exec_context_set_transient_property(
                 }
 
                 extension_images = mount_image_free_many(extension_images, &n_extension_images);
-
-                return 1;
-
-        } else if (STR_IN_SET(name, "StateDirectoryQuota", "CacheDirectoryQuota", "LogsDirectoryQuota")) {
-                uint64_t quota_absolute;
-                uint32_t quota_scale;
-                bool quota_set;
-
-                r = sd_bus_message_enter_container(message, 'r', "tub");
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_read(message, "t", &quota_absolute);
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_read(message, "u", &quota_scale);
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_read(message, "b", &quota_set);
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_exit_container(message);
-                if (r < 0)
-                        return r;
-
-                ExecDirectoryType dt;
-                dt = exec_directory_type_from_string(name);
-                if (dt < 0)
-                        return -EINVAL;
-
-                if (!UNIT_WRITE_FLAGS_NOOP(flags)) {
-                        c->directories[dt].exec_quota.quota_absolute = quota_absolute;
-                        c->directories[dt].exec_quota.quota_scale = quota_scale;
-                        c->directories[dt].exec_quota.quota_set = quota_set;
-
-                        unit_write_settingf(u, flags, name, "%s=%lu %u %d", name, quota_absolute, quota_scale, quota_set);
-                }
 
                 return 1;
 

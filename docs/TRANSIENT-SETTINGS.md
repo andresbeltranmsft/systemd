@@ -213,10 +213,13 @@ All execution-related settings are available for transient units.
 ✓ RuntimeDirectoryMode=
 ✓ RuntimeDirectory=
 ✓ StateDirectoryMode=
+✓ StateDirectoryQuota=
 ✓ StateDirectory=
 ✓ CacheDirectoryMode=
+✓ CacheDirectoryQuota=
 ✓ CacheDirectory=
 ✓ LogsDirectoryMode=
+✓ LogsDirectoryQuota=
 ✓ LogsDirectory=
 ✓ ConfigurationDirectoryMode=
 ✓ ConfigurationDirectory=
