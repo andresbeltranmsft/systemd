@@ -45,7 +45,7 @@ int quotactl_path(int cmd, const char *path, int id, void *addr) {
 }
 
 int is_proj_id_quota_supported(int fd, uint32_t proj_id, struct dqblk *req) {
-        int r = 0;
+        int r;
 
         r = RET_NERRNO(quotactl_fd(fd, QCMD_FIXED(Q_GETQUOTA, PRJQUOTA), proj_id, req));
         if (r == -ESRCH || ERRNO_IS_NEG_NOT_SUPPORTED(r) || ERRNO_IS_NEG_PRIVILEGE(r))
@@ -57,12 +57,13 @@ int is_proj_id_quota_supported(int fd, uint32_t proj_id, struct dqblk *req) {
         return true;
 }
 
-int set_quota_proj_id(int fd, const char *path, uint32_t proj_id) {
+int set_proj_id_verify_exclusive(int fd, uint32_t proj_id) {
         int r = 0;
 
         /* Set to top level first because of the case where directories already exist with multiple subdirectories,
            in which case, number of inodes will be > 1 if applied recursively only */
-        r = set_proj_id(path, proj_id);
+        log_info("andres setting once for %d with pid=%u", fd, proj_id);
+        r = set_proj_id(fd, proj_id);
         if (r < 0)
                 return r;
 
@@ -75,7 +76,8 @@ int set_quota_proj_id(int fd, const char *path, uint32_t proj_id) {
         if (req.dqb_curinodes != 1)
                 return false;
 
-        r = set_proj_id_recursive(path, proj_id);
+        log_info("andres setting recursively for %d with pid=%u", fd, proj_id);
+        r = set_proj_id_recursive(fd, proj_id);
         if (r < 0)
                 return r;
 

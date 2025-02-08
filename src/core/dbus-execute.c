@@ -3599,23 +3599,7 @@ int bus_exec_context_set_transient_property(
                 uint32_t quota_scale = UINT32_MAX;
                 bool quota_enforce;
 
-                r = sd_bus_message_enter_container(message, 'r', "tub");
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_read(message, "t", &quota_absolute);
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_read(message, "u", &quota_scale);
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_read(message, "b", &quota_enforce);
-                if (r < 0)
-                        return r;
-
-                r = sd_bus_message_exit_container(message);
+                r = sd_bus_message_read(message, "(tub)", &quota_absolute, &quota_scale, &quota_enforce);
                 if (r < 0)
                         return r;
 
@@ -3625,15 +3609,12 @@ int bus_exec_context_set_transient_property(
                         else {
                                 ExecDirectoryType dt;
                                 if (streq(name, "StateDirectoryQuota"))
-                                        dt = exec_directory_type_from_string("StateDirectory");
+                                        dt = EXEC_DIRECTORY_STATE;
                                 else if (streq(name, "CacheDirectoryQuota"))
-                                        dt = exec_directory_type_from_string("CacheDirectory");
+                                        dt = EXEC_DIRECTORY_CACHE;
                                 else if (streq(name, "LogsDirectoryQuota"))
-                                        dt = exec_directory_type_from_string("LogsDirectory");
+                                        dt = EXEC_DIRECTORY_LOGS;
                                 else
-                                        return -EINVAL;
-
-                                if (dt < 0)
                                         return -EINVAL;
 
                                 c->directories[dt].exec_quota.quota_absolute = quota_absolute;
@@ -3641,9 +3622,9 @@ int bus_exec_context_set_transient_property(
                                 c->directories[dt].exec_quota.quota_enforce = quota_enforce;
 
                                 if (quota_absolute != UINT64_MAX)
-                                        unit_write_settingf(u, flags, name, "%s=%lu", name, quota_absolute);
+                                        unit_write_settingf(u, flags, name, "%s=%" PRIu64, name, quota_absolute);
                                 else
-                                        unit_write_settingf(u, flags, name, "%s=%u", name, quota_scale);
+                                        unit_write_settingf(u, flags, name, "%s=%" PRIu32, name, quota_scale);
                         }
                 }
 

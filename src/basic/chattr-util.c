@@ -175,10 +175,14 @@ int read_attr_at(int dir_fd, const char *path, unsigned *ret) {
 }
 
 int get_proj_id(int fd, uint32_t *ret) {
+        assert(ret);
+
         struct fsxattr attrs;
 
         if (ioctl(fd, FS_IOC_FSGETXATTR, &attrs) < 0)
                 return -errno;
+
+        *ret = 0;
 
         if (attrs.fsx_projid > 0)
                 *ret = attrs.fsx_projid;
@@ -186,12 +190,15 @@ int get_proj_id(int fd, uint32_t *ret) {
         return 0;
 }
 
-int set_proj_id(const char *path, uint32_t proj_id) {
+int set_proj_id(int inode_fd, uint32_t proj_id) {
         struct fsxattr attrs;
+        int fd;
 
-        int fd = xopenat(AT_FDCWD, path, O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW);
-        if (fd < 0)
+        fd = fd_reopen(inode_fd, O_RDONLY|O_CLOEXEC);
+        if (fd < 0) {
+                log_info("andres fd = %d", fd);
                 return fd;
+        }
 
         if (ioctl(fd, FS_IOC_FSGETXATTR, &attrs) < 0)
                 return -errno;
@@ -212,17 +219,21 @@ static int set_proj_id_cb(
                 const struct dirent *de,
                 const struct statx *sx,
                 void *userdata) {
-        uint32_t proj_id = *(uint32_t *) userdata;
-        return set_proj_id(path, proj_id);
+
+        if (de != NULL && !IN_SET(de->d_type, DT_DIR, DT_REG))
+                return RECURSE_DIR_CONTINUE;
+
+        uint32_t proj_id = PTR_TO_UINT32(userdata);
+        return set_proj_id(inode_fd, proj_id);
 }
 
-int set_proj_id_recursive(const char *path, uint32_t proj_id) {
+int set_proj_id_recursive(int fd, uint32_t proj_id) {
         return recurse_dir_at(
-                        AT_FDCWD,
-                        path,
+                        fd,
+                        /* path = */ NULL,
                         /* statx_mask = */ 0,
                         /* n_depth_max = */ UINT_MAX,
-                        RECURSE_DIR_ENSURE_TYPE|RECURSE_DIR_TOPLEVEL,
+                        RECURSE_DIR_ENSURE_TYPE|RECURSE_DIR_TOPLEVEL|RECURSE_DIR_INODE_FD,
                         set_proj_id_cb,
-                        &proj_id);
+                        UINT32_TO_PTR(proj_id));
 }
